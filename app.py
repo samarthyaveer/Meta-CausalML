@@ -653,12 +653,14 @@ elif st.session_state.step == 4:
         )
         st.markdown("")
 
-    # ── C. CATE DECILE TABLE ──────────────────────────────────────────────
-    sec("C  —  CATE Deciles")
+    # ── C. CATE DECILE ANALYSIS ───────────────────────────────────────────
+    sec("C  —  CATE Decile Analysis")
     ib(
-        "Customers in the test set sorted by predicted CATE into 10 equal groups. "
-        "D10 = top 10% (highest predicted uplift), D1 = bottom 10%. "
-        "A well-calibrated model shows a clear monotone increase from D1 to D10."
+        "Customers in the test set are sorted by predicted CATE into 10 equal groups (deciles). "
+        "D10 = top 10% highest predicted uplift, D1 = bottom 10%. "
+        "The bar chart shows whether the model creates a clear separation — a steep gradient from D1 to D10 "
+        "means the model confidently distinguishes persuadables from non-persuadables. "
+        "A flat chart means the model is struggling to differentiate."
     )
 
     learner_tabs = st.tabs([LEARNER_OPTIONS[k] for k in outputs])
@@ -691,77 +693,8 @@ elif st.session_state.step == 4:
             except Exception as exc:
                 notif(f"Could not build decile table: {exc}", "warn")
 
-    # ── D. TARGETING EFFICIENCY ───────────────────────────────────────────
-    sec("D  —  Targeting Efficiency")
-    ib(
-        "If you rank all customers by predicted CATE (highest first) and target the top X%, "
-        "what share of the <em>total model-predicted uplift</em> do you capture? "
-        "A good model captures most uplift by targeting a small fraction."
-    )
-
-    tgt_tabs = st.tabs([LEARNER_OPTIONS[k] for k in outputs])
-    for tab_obj, (code, art) in zip(tgt_tabs, outputs.items()):
-        with tab_obj:
-            cate_vals = art.test_cate.values
-            total_gain = art.gain_curve["gain"].iloc[-1]
-            tgt_rows = []
-            for pct in [10, 20, 30, 40, 50]:
-                n_top  = max(1, int(len(cate_vals) * pct / 100))
-                top_ix = np.argsort(cate_vals)[::-1][:n_top]
-                if has_true:
-                    true_arr = result.prepared_data.true_cate_test.values
-                    captured = float(true_arr[top_ix].sum())
-                    total_t  = float(true_arr.sum()) if float(true_arr.sum()) != 0 else float("nan")
-                    pct_capt = f"{captured/total_t*100:.1f}%" if not np.isnan(total_t) else "—"
-                    avg_true = f"{true_arr[top_ix].mean():+.4f}"
-                else:
-                    row_pct  = art.gain_curve["population_fraction"]
-                    # interpolate gain at this percentile
-                    idx_near = (row_pct - pct/100).abs().idxmin()
-                    captured = art.gain_curve["gain"].iloc[idx_near]
-                    pct_capt = f"{captured/total_gain*100:.1f}%" if total_gain else "—"
-                    avg_true = "—"
-
-                tgt_rows.append({
-                    "Target top %":            f"{pct}%",
-                    "Customers targeted":      f"{n_top:,}",
-                    "% uplift captured":       pct_capt,
-                    "Avg predicted CATE":      f"{cate_vals[top_ix].mean():+.4f}",
-                    "Avg true CATE (if known)":avg_true,
-                })
-            st.dataframe(pd.DataFrame(tgt_rows).set_index("Target top %"), width="stretch")
-
-    # ── E. UPLIFT SEGMENTS ────────────────────────────────────────────────
-    sec("E  —  Uplift Segments")
-    ib(
-        "Customers split into three groups by predicted CATE: "
-        "<strong>Top 25%</strong> (Persuadables — target these), "
-        "<strong>Middle 50%</strong> (Uncertain), "
-        "<strong>Bottom 25%</strong> (Sleeping Dogs or Lost Causes — avoid targeting)."
-    )
-
-    seg_tabs = st.tabs([LEARNER_OPTIONS[k] for k in outputs])
-    for tab_obj, (code, art) in zip(seg_tabs, outputs.items()):
-        with tab_obj:
-            seg_df = art.segment_summary.copy()
-            seg_df = seg_df.rename(columns={
-                "segment":                "Segment",
-                "user_count":             "Count",
-                "average_predicted_cate": "Avg Predicted CATE",
-                "average_outcome":        "Avg Outcome",
-                "average_true_cate":      "Avg True CATE",
-            })
-            # Format numerics
-            for col in ["Avg Predicted CATE", "Avg Outcome", "Avg True CATE"]:
-                if col in seg_df.columns:
-                    seg_df[col] = pd.to_numeric(seg_df[col], errors="coerce").map(
-                        lambda v: f"{v:+.4f}" if not np.isnan(v) else "—"
-                    )
-            st.dataframe(seg_df.set_index("Segment") if "Segment" in seg_df.columns else seg_df,
-                         width="stretch")
-
-    # ── F. FEATURE IMPORTANCE ─────────────────────────────────────────────
-    sec("F  —  Feature Importance")
+    # ── D. FEATURE IMPORTANCE ─────────────────────────────────────────────
+    sec("D  —  Feature Importance")
     ib(
         "Importance is measured by fitting a surrogate Random Forest to predict CATE from features. "
         "Higher importance = that feature has more influence on which customers are classified as persuadable. "
@@ -782,8 +715,8 @@ elif st.session_state.step == 4:
                 width="stretch",
             )
 
-    # ── G. EXPORT ──────────────────────────────────────────────────────────
-    sec("G  —  Export")
+    # ── E. EXPORT ──────────────────────────────────────────────────────────
+    sec("E  —  Export")
     export_df = result.predictions_full.copy()
     st.download_button(
         label=f"Download full predictions CSV  ({len(export_df):,} rows)",
@@ -794,22 +727,4 @@ elif st.session_state.step == 4:
     ib(
         "The CSV contains the original columns plus one <code>{learner}_cate</code> column "
         "per trained learner — the individual-level predicted treatment effect for each row."
-    )
-
-    # Quick data snapshot at the bottom
-    sec("Run Summary")
-    st.dataframe(
-        result.comparison_table[[
-            "learner_label", "average_predicted_cate", "predicted_ate_test",
-            "auuc_like", "normalized_auuc", "cate_rmse", "fit_seconds",
-        ]].rename(columns={
-            "learner_label":           "Learner",
-            "average_predicted_cate":  "Avg CATE (full)",
-            "predicted_ate_test":      "ATE (test)",
-            "auuc_like":               "AUUC (raw)",
-            "normalized_auuc":         "AUUC (norm.)",
-            "cate_rmse":               "CATE RMSE",
-            "fit_seconds":             "Fit time (s)",
-        }).set_index("Learner"),
-        width="stretch",
     )
